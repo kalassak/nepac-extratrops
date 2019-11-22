@@ -1,4 +1,4 @@
-'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs20191119/gfs_0p50_00z'
+'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs20191121/gfs_0p50_12z'
 *'set t 1 17'
 'define pres = 'pressfc
 'set sdfwrite pres.nc'

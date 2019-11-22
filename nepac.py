@@ -5,6 +5,9 @@ from scipy.ndimage.filters import minimum_filter, maximum_filter
 from mpl_toolkits.basemap import Basemap, addcyclic
 
 def floodfill(a, x, y, min_pres, lows, fillx, filly, origx, origy, traversed, invalid):
+	if (origx, origy) in invalid:
+		print "closing all recursive instances, already found to be invalid"
+		return 0
 	if calc_dist(x, y, origx, origy) > 2500:
 		#is 2500 km too close?
 		print "too far from center, assume low not deep enough"

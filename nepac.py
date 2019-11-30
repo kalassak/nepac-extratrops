@@ -18,7 +18,7 @@ def floodfill(a, x, y, min_pres, lows, fillx, filly, origx, origy, traversed, in
 			print "this low is not 8 hPa deep! %s %s within p_min+8" % (x, y)
 			invalid.append((origx, origy))
 			return 0
-	if a[y][x] < min_pres+800 and (x, y) not in traversed:
+	if a[y][x] < min_pres+8 and (x, y) not in traversed:
 		traversed.append((x, y))
 		if x > 0:
 			floodfill(a,x-1,y, min_pres, lows, fillx, filly, origx, origy, traversed, invalid)
@@ -54,6 +54,8 @@ nc4 = netCDF4.Dataset("u.nc")
 nc5 = netCDF4.Dataset("v.nc")
 nc6 = netCDF4.Dataset("sfcz.nc")
 nc7 = netCDF4.Dataset("t2m.nc")
+nc8 = netCDF4.Dataset("u10m.nc")
+nc9 = netCDF4.Dataset("v10m.nc")
 
 lats = nc.variables['lat'][:]
 lons = nc.variables['lon'][:]
@@ -65,24 +67,34 @@ u = nc4.variables['u250'][:]
 v = nc5.variables['v250'][:]
 sfcz = nc6.variables['sfcz'][:]
 t2m = nc7.variables['t2m'][:]
+u10m = nc8.variables['u10m'][:]
+v10m = nc9.variables['v10m'][:]
 
 g = 9.81
 R_d = 287
 
 thicks = hgt500 - hgt1000
-wind = (u**2 + v**2)**0.5*1.94384449 #m/s to kt
-mslp = psfc * np.exp(sfcz*g/R_d/t2m)
+wind250 = (u**2 + v**2)**0.5*1.94384449 #m/s to kt
+wind10m = (u10m**2 + v10m**2)**0.5*1.94384449 #m/s to kt
+mslp = psfc * np.exp(sfcz*g/R_d/t2m)/100
 
 print np.amax(thicks)
 print np.amin(thicks)
 
-WIND_SAMPLE_RATE = 2
+WIND_SAMPLE_RATE = 6
 
 nc.close()
+nc2.close()
+nc3.close()
+nc4.close()
+nc5.close()
+nc6.close()
+nc7.close()
+nc8.close()
+nc9.close()
 
 # find low centers
 data_ext = minimum_filter(mslp, 50, mode='nearest')
-
 mxy, mxx = np.where(data_ext == mslp)
 
 # get lat/lon of all low centers
@@ -105,6 +117,13 @@ for lon, lat, x, y in zip(low_lons, low_lats, mxx, mxy):
 print nepac_low_lats
 print nepac_low_lons
 
+#find wind maxima
+data_ext = maximum_filter(wind10m, 50, mode='nearest')
+mwy, mwx = np.where(data_ext == wind10m)
+
+wind_lons = lons[mwx]
+wind_lats = lats[mwy]
+
 #m = Basemap(projection='cyl', llcrnrlat=20,urcrnrlat=70,llcrnrlon=360-180,urcrnrlon=360-110,resolution='l') #-90 90 -180 180
 m = Basemap(width=9000000,height=6000000,
             rsphere=(6378137.00,6356752.3142),\
@@ -119,7 +138,7 @@ jetlevs = [0, 64, 85, 100, 120, 140, 160, 180, 200, 225, 250]
 qcolors = [(1, 1, 1), (0.5, 1, 0.5), (0.3, 0.8, 0.3), (0.1, 0.6, 0.1), (0, 0.2, 0.6), (0, 0.3, 0.8)]
 qlevs = [0, 0.5, 1, 2, 4, 8, 16]
 thicklevels = np.arange(0, 12000, 60)
-preslevs = np.arange(90000, 106000, 400)
+preslevs = np.arange(900, 1060, 4)
 
 parallels = np.arange(0, 90, 10)
 meridians = np.arange(0, 360, 10)
@@ -135,7 +154,8 @@ m.drawmeridians(meridians)
 lons2, lats2 = np.meshgrid(lons, lats)
 xx, yy = m(lons2, lats2)
 
-MXX, MXY = m(lons[mxx], lats[mxy]) #convert mins to map coordinates
+MXX, MXY = m(lons[mxx], lats[mxy]) #convert pressure mins to map coordinates
+MWX, MWY = m(lons[mwx], lats[mwy]) #convert wind maxs
 
 # plot contours
 print "plotting thickness"
@@ -144,8 +164,7 @@ plt.clabel(con_thick, con_thick.levels, fmt='%d')
 print "plotting psfc"
 m.contour(xx, yy, mslp, levels=preslevs, colors='k')
 print "plotting winds"
-m.contourf(xx, yy, wind, levels=jetlevs, colors=jetcolors, zorder=0)
-#plt.barbs(lons[::WIND_SAMPLE_RATE], lats[::WIND_SAMPLE_RATE], us[i,0,::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE], vs[i,0,::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE])
+m.contourf(xx, yy, wind250, levels=jetlevs, colors=jetcolors, zorder=0)
 
 #plot cyclones
 plt.plot(MXX, MXY, 'ro')
@@ -163,9 +182,25 @@ for nepac_x, nepac_y in zip(nepac_xs, nepac_ys):
 		print 'this is not nameable cyclone'
 		plotopts = 'mo'
 	else:
-		print 'this is nameable'
-		valid.append(['name', lats[nepac_y], lons[nepac_x], 0, mslp[nepac_y,nepac_x]])
-		plotopts = 'go'
+		#check if the storm is associated with gales
+		#determine max 10m wind speed
+		last_wind = 0
+		storm_wind = 0
+		for wlo, wla, wx, wy in zip(wind_lons, wind_lats, mwx, mwy):
+			dist = calc_dist(wla, wlo, lats[nepac_y], lons[nepac_x]-360)
+			wind = wind10m[wy,wx]
+			if dist < 1000 and wind > last_wind: #find highest wind maximum within 1000 km of center
+				storm_wind = wind
+				last_wind = wind
+
+		#if the storm is associated with gales
+		if storm_wind >= 34:
+			print 'this is nameable'
+			valid.append(['name', lats[nepac_y], lons[nepac_x], storm_wind, mslp[nepac_y,nepac_x]])
+			plotopts = 'go'
+		else:
+			print 'not nameable, no gales'
+			plotopts = 'co'
 	if PLOT_DEPTH_FILL == True:
 		FILLX, FILLY = m(lons[fillx], lats[filly])
 		plt.plot(FILLX, FILLY, plotopts)
@@ -204,23 +239,58 @@ for storm in valid:
 		f2.close()
 
 	#write data to current file
-	s = '%s,%s,%s,%s,%d\n' % (storm[0], storm[1], storm[2]-360, storm[3], storm[4]/100)
+	s = '%s,%s,%s,%d,%d\n' % (storm[0], storm[1], storm[2]-360, storm[3], storm[4])
 	f.writelines(s)
 	f3.writelines(s)
 
 	#plot the storm name
 	STORMX, STORMY = m(storm[2], storm[1]) #lon, lat
 	print STORMX
-	an = '%s\n%d hPa' % (storm[0], storm[4]/100)
+	an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
 	plt.annotate(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000))
 f.close()
 f3.close()
 
 plt.colorbar(fraction=0.025, pad=0.01)
 print 'saving figure...'
-plt.savefig("/home/kalassak/nepac/test.png", bbox_inches='tight', pad_inches=0, dpi=100)
+plt.savefig("/home/kalassak/nepac/1000-500_thickness_mslp_250_wind.png", bbox_inches='tight', pad_inches=0, dpi=100)
 print 'figure saved!'
 plt.close()
+
+#SECOND PLOT --- plot mslp & 10m winds
+fig = plt.figure(figsize=(18.6, 10.5))
+ax = fig.add_axes((0,0,1,1))
+
+m.drawcoastlines(linewidth=1.2)
+m.drawparallels(parallels)
+m.drawmeridians(meridians)
+
+# plot contours
+print "plotting psfc"
+con_mslp = m.contour(xx, yy, mslp, levels=preslevs, linewidths=0.75, colors='k')
+plt.clabel(con_mslp, con_mslp.levels, fmt='%d')
+print "plotting sfc winds"
+m.contourf(xx, yy, wind10m, levels=ulevs, colors=ucolors, zorder=0)
+m.barbs(xx[::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE], yy[::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE], u10m[::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE]*1.94384449, v10m[::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE]*1.94384449) #make sure to convert m/s to kt
+
+#plot cyclones
+plt.plot(MXX, MXY, 'ro')
+#plt.plot(MWX, MWY, 'yo')
+for storm in valid:
+	#we don't need to do much here since all these storms should have been determined when plotting the previous figure
+	STORMX, STORMY = m(storm[2], storm[1]) #lon, lat	
+	an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
+	t = plt.text(STORMX+500000, STORMY+500000, an, fontsize=12, zorder=10)
+	#t = plt.text(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000), fontsize=14, zorder=10)
+	t.set_bbox(dict(facecolor='white', alpha=0.5, edgecolor='red'))
+	
+
+plt.colorbar(fraction=0.025, pad=0.01)
+print 'saving figure 2...'
+plt.savefig("/home/kalassak/nepac/mslp_10m_wind.png", bbox_inches='tight', pad_inches=0, dpi=100)
+print 'figure 2 saved!'
+plt.close()
+
 
 #m.drawparallels(np.arange(-80,81,20),labels=[1,1,0,0])
 #m.drawmeridians(np.arange(0,360,60),labels=[0,0,0,1])

@@ -1,4 +1,4 @@
-'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs20191121/gfs_0p50_12z'
+'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs20191130/gfs_0p50_12z'
 *'set t 1 17'
 'define pres = 'pressfc
 'set sdfwrite pres.nc'
@@ -21,3 +21,9 @@
 'define t2m = 'tmp2m
 'set sdfwrite t2m.nc'
 'sdfwrite 't2m
+'define u10m = 'ugrd10m
+'set sdfwrite u10m.nc'
+'sdfwrite 'u10m
+'define v10m = 'vgrd10m
+'set sdfwrite v10m.nc'
+'sdfwrite 'v10m

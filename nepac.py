@@ -1,12 +1,15 @@
+import sys, math
 import netCDF4
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import minimum_filter, maximum_filter
 from mpl_toolkits.basemap import Basemap, addcyclic
 
+print "this script has even started"
+
 def floodfill(a, x, y, min_pres, lows, fillx, filly, origx, origy, traversed, invalid):
 	if (origx, origy) in invalid:
-		print "closing all recursive instances, already found to be invalid"
+		#print "closing all recursive instances, already found to be invalid"
 		return 0
 	if calc_dist(x, y, origx, origy) > 2500:
 		#is 2500 km too close?
@@ -45,7 +48,23 @@ def calc_dist(lat1,lon1,lat2,lon2):
 	d = R * c
 	return d
 
+def fmt_lon(n):
+	if n > 180.0:
+		s = "%.1fW" % math.fabs(n-360)
+	else:
+		s = "%.1fE" % n
+	return s
+
+def fmt_lat(n):
+	if n > 0.0:
+		s = "%.1fN" % n
+	else:
+		s = "%.1fS" % math.fabs(n)
+	return s
+
 PLOT_DEPTH_FILL = False
+YYYYMMDD = sys.argv[1]
+HH = sys.argv[2]
 
 nc = netCDF4.Dataset("pres.nc")
 nc2 = netCDF4.Dataset("z1000.nc")
@@ -108,14 +127,14 @@ nepac_ys = []
 lows = [] #for low coordinate pairs
 for lon, lat, x, y in zip(low_lons, low_lats, mxx, mxy):
 	lows.append((x, y))
-	if lon >= 180 and lon <= 250 and lat >= 30 and lat <= 70:
+	if lon >= 140 and lon <= 250 and lat >= 30 and lat <= 70:
 		nepac_low_lats.append(lat)
 		nepac_low_lons.append(lon)
 		nepac_xs.append(x)
 		nepac_ys.append(y)
 
-print nepac_low_lats
-print nepac_low_lons
+#print nepac_low_lats
+#print nepac_low_lons
 
 #find wind maxima
 data_ext = maximum_filter(wind10m, 50, mode='nearest')
@@ -128,7 +147,7 @@ wind_lats = lats[mwy]
 m = Basemap(width=9000000,height=6000000,
             rsphere=(6378137.00,6356752.3142),\
             resolution='l',area_thresh=1000.,projection='lcc',\
-            lat_1=45.,lat_2=55,lat_0=50,lon_0=-140.)
+            lat_1=45.,lat_2=55,lat_0=50,lon_0=-160.)
 
 ucolors = [(1, 1, 1), (0, 1, 1), (0, 0.84, 0.84), (0, 0.74, 0.74), (0, 1, 0.64), (0, 0.9, 0.59), (1, 1, 0), (1, 0.75, 0), (1, 0.5, 0),
 	(1, 0, 0), (1, 0, 1), (1, 0.5, 1)]
@@ -180,26 +199,32 @@ for nepac_x, nepac_y in zip(nepac_xs, nepac_ys):
 	floodfill(mslp, nepac_x, nepac_y, mslp[nepac_y,nepac_x], lows, fillx, filly, nepac_x, nepac_y, traversed, invalid)
 	if (nepac_x, nepac_y) in invalid:
 		print 'this is not nameable cyclone'
+		valid.append(['name', lats[nepac_y], lons[nepac_x], 0, mslp[nepac_y,nepac_x], 'EX', 0., 0.])
 		plotopts = 'mo'
 	else:
 		#check if the storm is associated with gales
 		#determine max 10m wind speed
 		last_wind = 0
 		storm_wind = 0
+		maxwlo = 0.
+		maxwla = 0.
 		for wlo, wla, wx, wy in zip(wind_lons, wind_lats, mwx, mwy):
 			dist = calc_dist(wla, wlo, lats[nepac_y], lons[nepac_x]-360)
 			wind = wind10m[wy,wx]
 			if dist < 1000 and wind > last_wind: #find highest wind maximum within 1000 km of center
 				storm_wind = wind
+				maxwlo = wlo
+				maxwla = wla
 				last_wind = wind
 
 		#if the storm is associated with gales
 		if storm_wind >= 34:
 			print 'this is nameable'
-			valid.append(['name', lats[nepac_y], lons[nepac_x], storm_wind, mslp[nepac_y,nepac_x]])
+			valid.append(['name', lats[nepac_y], lons[nepac_x], storm_wind, mslp[nepac_y,nepac_x], 'WS', maxwla, maxwlo])
 			plotopts = 'go'
 		else:
 			print 'not nameable, no gales'
+			valid.append(['name', lats[nepac_y], lons[nepac_x], storm_wind, mslp[nepac_y,nepac_x], 'EX', maxwla, maxwlo])
 			plotopts = 'co'
 	if PLOT_DEPTH_FILL == True:
 		FILLX, FILLY = m(lons[fillx], lats[filly])
@@ -215,6 +240,7 @@ for line in k:
 #output new data
 f = open('current', 'w')
 f3 = open('all', 'a')
+f4 = open('wind', 'a')
 for storm in valid:
 	#match storms
 	i = 0
@@ -229,31 +255,47 @@ for storm in valid:
 		i += 1
 
 	#name the storm if it didn't exist before
-	if named == False:
-		f2 = open('names', 'r')
-		names = f2.readlines()
+	if named == False and storm[5] == 'EX':
+		pass #we're still tracking this low but it doesn't meet windstorm criteria
+	elif named == False and storm[2] >= 180:
+		f2 = open('names_ne', 'r')
+		names_ne = f2.readlines()
 		f2.close()
-		storm[0] = names.pop(0).strip('\n')
-		f2 = open('names', 'w')
-		f2.writelines(names)
+		storm[0] = names_ne.pop(0).strip('\n')
+		f2 = open('names_ne', 'w')
+		f2.writelines(names_ne)
+		f2.close()
+	elif named == False:
+		f2 = open('names_nw', 'r')
+		names_nw = f2.readlines()
+		f2.close()
+		storm[0] = names_nw.pop(0).strip('\n')
+		f2 = open('names_nw', 'w')
+		f2.writelines(names_nw)
 		f2.close()
 
 	#write data to current file
-	s = '%s,%s,%s,%d,%d\n' % (storm[0], storm[1], storm[2]-360, storm[3], storm[4])
-	f.writelines(s)
-	f3.writelines(s)
+	if storm[0] != 'name': #if actually named
+		s = '%s,%s,%s,%d,%d\n' % (storm[0], storm[1], storm[2]-360, storm[3], storm[4])
+		f.writelines(s)
+		s2 = 'BB,%s,%s%s,,,%s,%s,%d,%d,%s\n' % (storm[0], YYYYMMDD, HH, fmt_lat(float(storm[1])), fmt_lon(float(storm[2])), storm[3], storm[4], storm[5])
+		f3.writelines(s2)
+		s3 = '%s,%s%s,%s,%s\n' % (storm[0], YYYYMMDD, HH, storm[6], storm[7]-360)
+		f4.writelines(s3)
 
 	#plot the storm name
-	STORMX, STORMY = m(storm[2], storm[1]) #lon, lat
-	print STORMX
-	an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
-	plt.annotate(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000))
+	if storm[5] == 'WS': #if actually a windstorm
+		STORMX, STORMY = m(storm[2], storm[1]) #lon, lat
+		print STORMX
+		if STORMX > 0:
+			an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
+			plt.annotate(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000))
 f.close()
 f3.close()
 
 plt.colorbar(fraction=0.025, pad=0.01)
 print 'saving figure...'
-plt.savefig("/home/kalassak/nepac/1000-500_thickness_mslp_250_wind.png", bbox_inches='tight', pad_inches=0, dpi=100)
+plt.savefig("/home/kalassak/nepac/1000-500_thickness_mslp_250_wind_%s%s.png" % (YYYYMMDD, HH), bbox_inches='tight', pad_inches=0, dpi=100)
 print 'figure saved!'
 plt.close()
 
@@ -277,20 +319,23 @@ m.barbs(xx[::WIND_SAMPLE_RATE,::WIND_SAMPLE_RATE], yy[::WIND_SAMPLE_RATE,::WIND_
 plt.plot(MXX, MXY, 'ro')
 #plt.plot(MWX, MWY, 'yo')
 for storm in valid:
-	#we don't need to do much here since all these storms should have been determined when plotting the previous figure
-	STORMX, STORMY = m(storm[2], storm[1]) #lon, lat	
-	an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
-	t = plt.text(STORMX+500000, STORMY+500000, an, fontsize=12, zorder=10)
-	#t = plt.text(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000), fontsize=14, zorder=10)
-	t.set_bbox(dict(facecolor='white', alpha=0.5, edgecolor='red'))
+	if storm[5] == 'WS': #if actually a windstorm
+		STORMX, STORMY = m(storm[2], storm[1]) #lon, lat
+		if STORMX+50000 > 0:	
+			an = '%s\n%d kts, %d hPa' % (storm[0], storm[3], storm[4])
+			t = plt.text(STORMX+500000, STORMY+500000, an, fontsize=12, zorder=10)
+			#t = plt.text(an, xy=(STORMX, STORMY), xytext=(STORMX+50000, STORMY+50000), fontsize=14, zorder=10)
+			t.set_bbox(dict(facecolor='white', alpha=0.5, edgecolor='red'))
 	
 
 plt.colorbar(fraction=0.025, pad=0.01)
 print 'saving figure 2...'
-plt.savefig("/home/kalassak/nepac/mslp_10m_wind.png", bbox_inches='tight', pad_inches=0, dpi=100)
+plt.savefig("/home/kalassak/nepac/mslp_10m_wind_%s%s.png" % (YYYYMMDD, HH), bbox_inches='tight', pad_inches=0, dpi=100)
 print 'figure 2 saved!'
 plt.close()
 
+print nepac_low_lats
+print nepac_low_lons
 
 #m.drawparallels(np.arange(-80,81,20),labels=[1,1,0,0])
 #m.drawmeridians(np.arange(0,360,60),labels=[0,0,0,1])

@@ -1,4 +1,8 @@
-'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs20191130/gfs_0p50_12z'
+function main(args)
+yyyymmdd = subwrd(args,1)
+hh = subwrd(args,2)
+
+'sdfopen http://nomads.ncep.noaa.gov:80/dods/gfs_0p50/gfs'yyyymmdd'/gfs_0p50_'hh'z'
 *'set t 1 17'
 'define pres = 'pressfc
 'set sdfwrite pres.nc'
